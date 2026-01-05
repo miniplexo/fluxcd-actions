@@ -1,0 +1,71 @@
+name: Promote build manifests to environment
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        description: "Application name (defaults to repo name)"
+        required: false
+        default: ${{ github.event.repository.name }}
+        type: string
+      source_env:
+        description: "Source logical environment (folder under apps/)"
+        required: false
+        default: "build"
+        type: string
+      target_env:
+        description: "Target logical environment (e.g., dev, prod)"
+        required: true
+        type: string
+      flux_repo:
+        description: "Flux Git repository name"
+        required: true
+        type: string
+    secrets:
+      OCI_K3S_FLUX_REPO_ACCESS_TOKEN:
+        description: "Flux repo access token"
+        required: true
+
+permissions:
+  contents: none
+
+jobs:
+  promote_manifests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Flux repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.flux_repo }}
+          token: ${{ secrets.OCI_K3S_FLUX_REPO_ACCESS_TOKEN }}
+          path: flux-repo
+
+      - name: Promote manifests from source to target environment
+        run: |
+          SRC_PATH="flux-repo/apps/${{ inputs.source_env }}/${{ inputs.app_name }}"
+          DEST_PATH="flux-repo/apps/${{ inputs.target_env }}/${{ inputs.app_name }}"
+
+          if [ ! -d "${SRC_PATH}" ]; then
+            echo "Source path '${SRC_PATH}' does not exist."
+            exit 1
+          fi
+
+          mkdir -p "${DEST_PATH}"
+          rm -rf "${DEST_PATH:?}/"*
+          cp -R "${SRC_PATH}/." "${DEST_PATH}/"
+
+      - name: Commit and push promotion to Flux repo
+        run: |
+          cd flux-repo
+          git config user.name "${{ github.repository_owner }}-github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+
+          git add .
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Promote ${{ inputs.app_name }} from ${{ inputs.source_env }} to ${{ inputs.target_env }}"
+          git push

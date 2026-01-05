@@ -1,0 +1,92 @@
+name: Compose to Kubernetes manifests
+
+on:
+  # This workflow is reusable from app repositories
+  workflow_call:
+    inputs:
+      app_name:
+        description: "Application name (only used for logging)"
+        required: false
+        default: ${{ github.event.repository.name }}
+        type: string
+      docker_compose_path:
+        description: "Path to docker-compose file relative to repo root"
+        required: false
+        default: "docker-compose.yaml"
+        type: string
+      output_path:
+        description: "Relative path to write Kubernetes manifests"
+        required: false
+        default: "build-output"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  compose_to_k8s:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout app repository
+        uses: actions/checkout@v4
+
+      - name: Trace input parameters
+        run: |
+          echo "App name       : '${{ inputs.app_name }}'"
+          echo "Compose file   : '${{ inputs.docker_compose_path }}'"
+          echo "Output path    : '${{ inputs.output_path }}'"
+
+      - name: Prepare output directory
+        run: |
+          echo "Preparing output directory: '${{ inputs.output_path }}'"
+          mkdir -p "${{ inputs.output_path }}"
+          # Clean any previous contents to keep builds deterministic
+          rm -rf "${{ inputs.output_path }}/*"
+
+      - name: Install kompose
+        run: |
+          set -e
+          KOMPOSE_VERSION="v1.34.0"
+          echo "Installing Kompose ${KOMPOSE_VERSION}..."
+          curl -L "https://github.com/kubernetes/kompose/releases/download/${KOMPOSE_VERSION}/kompose-linux-amd64" -o kompose
+          chmod +x kompose
+          sudo mv kompose /usr/local/bin/kompose
+          echo "Kompose version:"
+          kompose version
+
+      - name: Verify docker-compose file exists
+        run: |
+          if [ ! -f "${{ inputs.docker_compose_path }}" ]; then
+            echo "ERROR: docker-compose file '${{ inputs.docker_compose_path }}' not found in repository root."
+            exit 1
+          fi
+          echo "Found docker-compose file at '${{ inputs.docker_compose_path }}'"
+
+      - name: Generate Kubernetes manifests from docker-compose
+        run: |
+          set -e
+          echo "Running Kompose to convert '${{ inputs.docker_compose_path }}' -> '${{ inputs.output_path }}'..."
+          kompose convert \
+            -f "${{ inputs.docker_compose_path }}" \
+            -o "${{ inputs.output_path }}"
+          echo "Kompose conversion completed. Generated files:"
+          ls -R "${{ inputs.output_path }}"
+
+      - name: Upload Kubernetes manifests as artifact
+        # This makes the manifests available to downstream reusable workflows
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: ${{ inputs.output_path }}
+          if-no-files-found: error
+
+      # OPTIONAL: add patches / transforms here
+      # - name: Apply patches to manifests
+      #   run: |
+      #     ./scripts/patch-manifests.sh "${{ inputs.output_path }}"
+
+      # OPTIONAL: add validation (kubeconform, kubeval, etc.)
+      # - name: Validate Kubernetes manifests
+      #   run: |
+      #     kubeconform -strict -summary "${{ inputs.output_path }}"
