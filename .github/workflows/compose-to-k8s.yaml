@@ -72,6 +72,8 @@ jobs:
             -o "${{ inputs.output_path }}"
           echo "Kompose conversion completed. Generated files:"
           ls -R "${{ inputs.output_path }}"
+          echo "Running kustomize to create app level kustomization.yaml"
+          kustomize create --autodetect
 
       - name: Upload Kubernetes manifests as artifact
         # This makes the manifests available to downstream reusable workflows
