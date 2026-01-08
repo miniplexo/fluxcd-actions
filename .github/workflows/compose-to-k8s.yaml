@@ -74,6 +74,8 @@ jobs:
           ls -R "${{ inputs.output_path }}"
           echo "Running kustomize to create app level kustomization.yaml"
           kustomize create --autodetect
+          echo "Updated file list:"
+          ls -R "${{ inputs.output_path }}"
 
       - name: Upload Kubernetes manifests as artifact
         # This makes the manifests available to downstream reusable workflows
