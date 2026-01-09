@@ -54,7 +54,7 @@ jobs:
 
       # ------------------------------------------------------------
       # 1b. Validate artifact structure before promotion
-      #     This prevents silent bad promotions.
+      #     This prevents silent bad promotions due to missing files.
       # ------------------------------------------------------------
       - name: Validate build-output structure
         shell: bash
@@ -71,12 +71,13 @@ jobs:
 
       # ------------------------------------------------------------
       # 2. Checkout the Flux GitOps repository using SSH + deploy key
-      #    The repo name is provided via org-level variable FLUX_REPO.
+      #    The repo name is provided via org-level variable OCI_K3S_FLUX_REPO
+      #    to keep platform ownership of the GitOps repo.
       # ------------------------------------------------------------
       - name: Checkout Flux repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ vars.FLUX_REPO }}
+          repository: ${{ vars.OCI_K3S_FLUX_REPO }}
           ssh-key: ${{ secrets.OCI_K3S_FLUX_REPO_DEPLOY_KEY }}
           path: flux-repo
 
@@ -92,6 +93,7 @@ jobs:
           echo "Promoting build-output → ${DEST_PATH}"
 
           mkdir -p "${DEST_PATH}"
+          # Remove any previous contents to keep promotions deterministic
           rm -rf "${DEST_PATH:?}/"*
 
           # Copy manifests and kustomization.yaml from the build artifact

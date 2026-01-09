@@ -81,8 +81,9 @@ jobs:
           echo "apiVersion: kustomize.config.k8s.io/v1beta1" > kustomization.yaml
           echo "kind: Kustomization" >> kustomization.yaml
           echo "resources:" >> kustomization.yaml
-          for f in manifests/*.yaml; do
-            echo "  - ${f#${{ inputs.output_path }}/}" >> kustomization.yaml
+          # Sort files to keep resource ordering deterministic across builds
+          for f in $(ls manifests/*.yaml | sort); do
+            echo "  - ${f}" >> kustomization.yaml
           done
           popd
           echo "kustomization.yaml created:"
@@ -103,13 +104,14 @@ jobs:
 
       - name: Upload Kubernetes manifests as artifact
         # This makes the manifests available to downstream reusable workflows
+        # (e.g., promotion workflows that pull the latest build-output artifact).
         uses: actions/upload-artifact@v4
         with:
           name: build-output
           path: ${{ inputs.output_path }}
           if-no-files-found: error
 
-      # OPTIONAL: add patches / transforms here
+      # OPTIONAL: add patches / transforms here if needed
       # - name: Apply patches to manifests
       #   run: |
       #     ./scripts/patch-manifests.sh "${{ inputs.output_path }}"
