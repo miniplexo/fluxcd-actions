@@ -10,19 +10,8 @@ on:
         default: ${{ github.event.repository.name }}
         type: string
 
-      source_env:
-        description: "Source logical environment (folder under apps/)"
-        required: false
-        default: "build"
-        type: string
-
       target_env:
         description: "Target logical environment (e.g., dev, prod)"
-        required: true
-        type: string
-
-      flux_repo:
-        description: "Flux Git repository name (org/repo)"
         required: true
         type: string
 
@@ -41,8 +30,8 @@ jobs:
     steps:
       # ------------------------------------------------------------
       # 0. Configure SSH using the deploy key
-      #    This replaces PAT-based auth and ensures repo-scoped,
-      #    machine-only access to the Flux GitOps repository.
+      #    This ensures repo-scoped, machine-only write access
+      #    to the Flux GitOps repository.
       # ------------------------------------------------------------
       - name: Configure SSH for Flux deploy key
         shell: bash
@@ -64,13 +53,30 @@ jobs:
           path: build-output
 
       # ------------------------------------------------------------
+      # 1b. Validate artifact structure before promotion
+      #     This prevents silent bad promotions.
+      # ------------------------------------------------------------
+      - name: Validate build-output structure
+        shell: bash
+        run: |
+          if [ ! -d build-output/manifests ]; then
+            echo "ERROR: build-output artifact is missing manifests/ directory."
+            exit 1
+          fi
+          if [ ! -f build-output/kustomization.yaml ]; then
+            echo "ERROR: build-output artifact is missing kustomization.yaml."
+            exit 1
+          fi
+          echo "build-output artifact validated successfully."
+
+      # ------------------------------------------------------------
       # 2. Checkout the Flux GitOps repository using SSH + deploy key
-      #    This ensures deterministic, repo-scoped write access.
+      #    The repo name is provided via org-level variable FLUX_REPO.
       # ------------------------------------------------------------
       - name: Checkout Flux repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.flux_repo }}
+          repository: ${{ vars.FLUX_REPO }}
           ssh-key: ${{ secrets.OCI_K3S_FLUX_REPO_DEPLOY_KEY }}
           path: flux-repo
 
@@ -97,8 +103,7 @@ jobs:
 
       # ------------------------------------------------------------
       # 4. Ensure per-app Flux Kustomization CR exists
-      #    This file is environment-agnostic and app-specific.
-      #    It allows Flux to reconcile ONLY this app folder.
+      #    This CR isolates reconciliation to ONLY this app folder.
       # ------------------------------------------------------------
       - name: Ensure per-app Flux Kustomization exists
         shell: bash
@@ -116,6 +121,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1m
+  timeout: 2m
   path: ./apps/${{ inputs.target_env }}/${{ inputs.app_name }}
   prune: true
   sourceRef:
@@ -146,5 +152,5 @@ EOF
             exit 0
           fi
 
-          git commit -m "Promote ${{ inputs.app_name }} to ${{ inputs.target_env }}"
+          git commit -m "Promote ${{ inputs.app_name }} to ${{ inputs.target_env }} from build ${{ github.sha }}"
           git push
