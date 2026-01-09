@@ -40,9 +40,9 @@ jobs:
       - name: Prepare output directory
         run: |
           echo "Preparing output directory: '${{ inputs.output_path }}'"
-          mkdir -p "${{ inputs.output_path }}"
           # Clean any previous contents to keep builds deterministic
-          rm -rf "${{ inputs.output_path }}/*"
+          rm -rf "${{ inputs.output_path }}"
+          mkdir -p "${{ inputs.output_path }}/manifests"
 
       - name: Install kompose
         run: |
@@ -58,7 +58,7 @@ jobs:
       - name: Verify docker-compose file exists
         run: |
           if [ ! -f "${{ inputs.docker_compose_path }}" ]; then
-            echo "ERROR: docker-compose file '${{ inputs.docker_compose_path }}' not found in repository root."
+            echo "ERROR: docker-compose file '${{ inputs.docker_compose_path }}' not found."
             exit 1
           fi
           echo "Found docker-compose file at '${{ inputs.docker_compose_path }}'"
@@ -69,13 +69,37 @@ jobs:
           echo "Running Kompose to convert '${{ inputs.docker_compose_path }}' -> '${{ inputs.output_path }}'..."
           kompose convert \
             -f "${{ inputs.docker_compose_path }}" \
-            -o "${{ inputs.output_path }}"
+            -o "${{ inputs.output_path }}/manifests"
           echo "Kompose conversion completed. Generated files:"
-          ls -R "${{ inputs.output_path }}"
-          echo "Running kustomize to create app level kustomization.yaml"
-          pushd build-output; kustomize create --autodetect; popd
-          echo "Updated file list:"
-          ls -R "${{ inputs.output_path }}"
+          ls -R "${{ inputs.output_path }}/manifests"
+
+      - name: Generate deterministic kustomization.yaml
+        run: |
+          set -e
+          echo "Generating deterministic kustomization.yaml..."
+          pushd "${{ inputs.output_path }}"
+          echo "apiVersion: kustomize.config.k8s.io/v1beta1" > kustomization.yaml
+          echo "kind: Kustomization" >> kustomization.yaml
+          echo "resources:" >> kustomization.yaml
+          for f in manifests/*.yaml; do
+            echo "  - ${f#${{ inputs.output_path }}/}" >> kustomization.yaml
+          done
+          popd
+          echo "kustomization.yaml created:"
+          cat "${{ inputs.output_path }}/kustomization.yaml"
+
+      - name: Generate metadata.json
+        run: |
+          echo "Generating metadata.json..."
+          cat <<EOF > "${{ inputs.output_path }}/metadata.json"
+{
+  "app": "${{ inputs.app_name }}",
+  "git_sha": "${{ github.sha }}",
+  "build_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+          echo "metadata.json created:"
+          cat "${{ inputs.output_path }}/metadata.json"
 
       - name: Upload Kubernetes manifests as artifact
         # This makes the manifests available to downstream reusable workflows

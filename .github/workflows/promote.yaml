@@ -1,6 +1,7 @@
 name: Promote build manifests to environment
 
 on:
+  # This workflow is reusable from app repositories
   workflow_call:
     inputs:
       app_name:
@@ -8,19 +9,23 @@ on:
         required: false
         default: ${{ github.event.repository.name }}
         type: string
+
       source_env:
         description: "Source logical environment (folder under apps/)"
         required: false
         default: "build"
         type: string
+
       target_env:
         description: "Target logical environment (e.g., dev, prod)"
         required: true
         type: string
+
       flux_repo:
         description: "Flux Git repository name"
         required: true
         type: string
+
     secrets:
       OCI_K3S_FLUX_REPO_ACCESS_TOKEN:
         description: "Flux repo access token"
@@ -34,6 +39,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ------------------------------------------------------------
+      # 1. Download the build-output artifact produced by the build pipeline
+      # ------------------------------------------------------------
+      - name: Download build-output artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: build-output
+
+      # ------------------------------------------------------------
+      # 2. Checkout the Flux GitOps repository where manifests will be promoted
+      # ------------------------------------------------------------
       - name: Checkout Flux repository
         uses: actions/checkout@v4
         with:
@@ -41,20 +58,61 @@ jobs:
           token: ${{ secrets.OCI_K3S_FLUX_REPO_ACCESS_TOKEN }}
           path: flux-repo
 
-      - name: Promote manifests from source to target environment
+      # ------------------------------------------------------------
+      # 3. Copy build artifacts into the target environment folder
+      #    This ensures apps/dev/<app> contains ONLY the promoted build
+      # ------------------------------------------------------------
+      - name: Promote manifests from build-output to target environment
         run: |
-          SRC_PATH="flux-repo/apps/${{ inputs.source_env }}/${{ inputs.app_name }}"
           DEST_PATH="flux-repo/apps/${{ inputs.target_env }}/${{ inputs.app_name }}"
 
-          if [ ! -d "${SRC_PATH}" ]; then
-            echo "Source path '${SRC_PATH}' does not exist."
-            exit 1
-          fi
+          echo "Promoting build-output → ${DEST_PATH}"
 
           mkdir -p "${DEST_PATH}"
           rm -rf "${DEST_PATH:?}/"*
-          cp -R "${SRC_PATH}/." "${DEST_PATH}/"
 
+          # Copy manifests and kustomization.yaml from the build artifact
+          cp -R build-output/manifests "${DEST_PATH}/"
+          cp build-output/kustomization.yaml "${DEST_PATH}/"
+
+          echo "Contents of ${DEST_PATH}:"
+          ls -R "${DEST_PATH}"
+
+      # ------------------------------------------------------------
+      # 4. Ensure per-app Flux Kustomization CR exists
+      #    This file is environment-agnostic and app-specific.
+      #    It allows Flux to reconcile ONLY this app folder.
+      # ------------------------------------------------------------
+      - name: Ensure per-app Flux Kustomization exists
+        run: |
+          APP_KUSTOMIZATION="flux-repo/clusters/k3s/${{ inputs.target_env }}/apps/${{ inputs.app_name }}.yaml"
+
+          echo "Ensuring Flux Kustomization exists at: ${APP_KUSTOMIZATION}"
+          mkdir -p "$(dirname "${APP_KUSTOMIZATION}")"
+
+          cat > "${APP_KUSTOMIZATION}" <<EOF
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ${{ inputs.app_name }}
+  namespace: flux-system
+spec:
+  interval: 1m
+  path: ./apps/${{ inputs.target_env }}/${{ inputs.app_name }}
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  wait: true
+EOF
+
+          echo "Generated Flux Kustomization:"
+          cat "${APP_KUSTOMIZATION}"
+
+      # ------------------------------------------------------------
+      # 5. Commit and push changes to Flux repo
+      # ------------------------------------------------------------
       - name: Commit and push promotion to Flux repo
         run: |
           cd flux-repo
@@ -67,5 +125,5 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Promote ${{ inputs.app_name }} from ${{ inputs.source_env }} to ${{ inputs.target_env }}"
+          git commit -m "Promote ${{ inputs.app_name }} to ${{ inputs.target_env }}"
           git push
