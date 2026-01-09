@@ -92,12 +92,12 @@ jobs:
         run: |
           echo "Generating metadata.json..."
           cat <<EOF > "${{ inputs.output_path }}/metadata.json"
-{
-  "app": "${{ inputs.app_name }}",
-  "git_sha": "${{ github.sha }}",
-  "build_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-}
-EOF
+          {
+            "app": "${{ inputs.app_name }}",
+            "git_sha": "${{ github.sha }}",
+            "build_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          }
+          EOF
           echo "metadata.json created:"
           cat "${{ inputs.output_path }}/metadata.json"
 

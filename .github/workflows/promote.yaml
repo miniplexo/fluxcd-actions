@@ -22,13 +22,13 @@ on:
         type: string
 
       flux_repo:
-        description: "Flux Git repository name"
+        description: "Flux Git repository name (org/repo)"
         required: true
         type: string
 
     secrets:
-      OCI_K3S_FLUX_REPO_ACCESS_TOKEN:
-        description: "Flux repo access token"
+      OCI_K3S_FLUX_REPO_DEPLOY_KEY:
+        description: "SSH private deploy key for Flux repo"
         required: true
 
 permissions:
@@ -40,6 +40,21 @@ jobs:
 
     steps:
       # ------------------------------------------------------------
+      # 0. Configure SSH using the deploy key
+      #    This replaces PAT-based auth and ensures repo-scoped,
+      #    machine-only access to the Flux GitOps repository.
+      # ------------------------------------------------------------
+      - name: Configure SSH for Flux deploy key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.OCI_K3S_FLUX_REPO_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Preload GitHub host key to avoid interactive trust prompt
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      # ------------------------------------------------------------
       # 1. Download the build-output artifact produced by the build pipeline
       # ------------------------------------------------------------
       - name: Download build-output artifact
@@ -49,20 +64,22 @@ jobs:
           path: build-output
 
       # ------------------------------------------------------------
-      # 2. Checkout the Flux GitOps repository where manifests will be promoted
+      # 2. Checkout the Flux GitOps repository using SSH + deploy key
+      #    This ensures deterministic, repo-scoped write access.
       # ------------------------------------------------------------
       - name: Checkout Flux repository
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.flux_repo }}
-          token: ${{ secrets.OCI_K3S_FLUX_REPO_ACCESS_TOKEN }}
+          ssh-key: ${{ secrets.OCI_K3S_FLUX_REPO_DEPLOY_KEY }}
           path: flux-repo
 
       # ------------------------------------------------------------
       # 3. Copy build artifacts into the target environment folder
-      #    This ensures apps/dev/<app> contains ONLY the promoted build
+      #    This ensures apps/<env>/<app> contains ONLY the promoted build.
       # ------------------------------------------------------------
       - name: Promote manifests from build-output to target environment
+        shell: bash
         run: |
           DEST_PATH="flux-repo/apps/${{ inputs.target_env }}/${{ inputs.app_name }}"
 
@@ -84,6 +101,7 @@ jobs:
       #    It allows Flux to reconcile ONLY this app folder.
       # ------------------------------------------------------------
       - name: Ensure per-app Flux Kustomization exists
+        shell: bash
         run: |
           APP_KUSTOMIZATION="flux-repo/clusters/k3s/${{ inputs.target_env }}/apps/${{ inputs.app_name }}.yaml"
 
@@ -111,9 +129,12 @@ EOF
           cat "${APP_KUSTOMIZATION}"
 
       # ------------------------------------------------------------
-      # 5. Commit and push changes to Flux repo
+      # 5. Commit and push changes to Flux repo using deploy key
+      #    This ensures machine-identity commits and prevents
+      #    human PAT drift or privilege leakage.
       # ------------------------------------------------------------
       - name: Commit and push promotion to Flux repo
+        shell: bash
         run: |
           cd flux-repo
           git config user.name "${{ github.repository_owner }}-github-actions"
