@@ -116,22 +116,22 @@ jobs:
           mkdir -p "$(dirname "${APP_KUSTOMIZATION}")"
 
           cat > "${APP_KUSTOMIZATION}" <<EOF
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: ${{ inputs.app_name }}
-  namespace: flux-system
-spec:
-  interval: 1m
-  timeout: 2m
-  path: ./apps/${{ inputs.target_env }}/${{ inputs.app_name }}
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: flux-system
-    namespace: flux-system
-  wait: true
-EOF
+          apiVersion: kustomize.toolkit.fluxcd.io/v1
+          kind: Kustomization
+          metadata:
+            name: ${{ inputs.app_name }}
+            namespace: flux-system
+          spec:
+            interval: 1m
+            timeout: 2m
+            path: ./apps/${{ inputs.target_env }}/${{ inputs.app_name }}
+            prune: true
+            sourceRef:
+              kind: GitRepository
+              name: flux-system
+              namespace: flux-system
+            wait: true
+          EOF
 
           echo "Generated Flux Kustomization:"
           cat "${APP_KUSTOMIZATION}"
