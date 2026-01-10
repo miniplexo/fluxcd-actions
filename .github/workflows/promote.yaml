@@ -52,7 +52,7 @@ jobs:
           name: build-output
           run-id: ${{ github.event.workflow_run.id }}
           # This tells the action to use the run's built-in auth to
-          # look at the "Build Kubernetes manifests" run
+          # look at the artifacts from a different workflow/run than the current
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: build-output
 
@@ -75,7 +75,7 @@ jobs:
 
       # ------------------------------------------------------------
       # 2. Checkout the Flux GitOps repository using SSH + deploy key
-      #    The repo name is provided via org-level variable OCI_K3S_FLUX_REPO
+      #    The repo name is provided via variable OCI_K3S_FLUX_REPO
       #    to keep platform ownership of the GitOps repo.
       # ------------------------------------------------------------
       - name: Checkout Flux repository
@@ -108,15 +108,19 @@ jobs:
           ls -R "${DEST_PATH}"
 
       # ------------------------------------------------------------
-      # 4. Ensure per-app Flux Kustomization CR exists
+      # 4. Generate per-app Flux Kustomization CR
       #    This CR isolates reconciliation to ONLY this app folder.
+      #    Namespace is derived from the environment: <env>-apps.
       # ------------------------------------------------------------
-      - name: Ensure per-app Flux Kustomization exists
+      - name: Generate per-app Flux Kustomization
         shell: bash
         run: |
           APP_KUSTOMIZATION="flux-repo/clusters/k3s/${{ inputs.target_env }}/apps/${{ inputs.app_name }}.yaml"
+          TARGET_NS="${{ inputs.target_env }}-apps"
 
-          echo "Ensuring Flux Kustomization exists at: ${APP_KUSTOMIZATION}"
+          echo "Generating Flux Kustomization at: ${APP_KUSTOMIZATION}"
+          echo "Using namespace: ${TARGET_NS}"
+
           mkdir -p "$(dirname "${APP_KUSTOMIZATION}")"
 
           cat > "${APP_KUSTOMIZATION}" <<EOF
@@ -127,14 +131,15 @@ jobs:
             namespace: flux-system
           spec:
             interval: 1m
-            timeout: 2m
             path: ./apps/${{ inputs.target_env }}/${{ inputs.app_name }}
             prune: true
             sourceRef:
               kind: GitRepository
               name: flux-system
               namespace: flux-system
+            targetNamespace: ${TARGET_NS}
             wait: true
+            timeout: 2m
           EOF
 
           echo "Generated Flux Kustomization:"
