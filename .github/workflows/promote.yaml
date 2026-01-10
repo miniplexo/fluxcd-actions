@@ -52,12 +52,16 @@ jobs:
       # This replaces the old artifact-based model. Releases
       # provide immutable, versioned, long-lived artifacts.
       # ------------------------------------------------------------
-      - name: Download release assets
-        uses: robinraju/release-downloader@v1
-        with:
-          tag: ${{ inputs.release_tag }}
-          fileName: "*"
-          out-file-path: release-assets
+      - name: Download release ZIP
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "${{ inputs.release_tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir release-assets
+
+          unzip release-assets/build-output.zip -d release-assets
 
       # ------------------------------------------------------------
       # 1b. Validate release structure before promotion.
