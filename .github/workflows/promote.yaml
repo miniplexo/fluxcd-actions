@@ -89,7 +89,7 @@ jobs:
         shell: bash
         run: |
           cd flux-repo
-          git remote set-url origin git@github.com:vmvmpvm-oci-k3s/flux-infra.git
+          git remote set-url origin ${{ vars.OCI_K3S_FLUX_REPO }}
 
       # ------------------------------------------------------------
       # 3. Copy build artifacts into the target environment folder
