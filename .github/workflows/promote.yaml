@@ -85,11 +85,11 @@ jobs:
           ssh-key: ${{ secrets.OCI_K3S_FLUX_REPO_DEPLOY_KEY }}
           path: flux-repo
 
-      - name: Ensure correct Git remote
-        shell: bash
-        run: |
-          cd flux-repo
-          git remote set-url origin ${{ vars.OCI_K3S_FLUX_REPO }}
+      # - name: Ensure correct Git remote
+      #   shell: bash
+      #   run: |
+      #     cd flux-repo
+      #     git remote set-url origin ${{ vars.OCI_K3S_FLUX_REPO }}
 
       # ------------------------------------------------------------
       # 3. Copy build artifacts into the target environment folder
