@@ -137,7 +137,7 @@ jobs:
               kind: GitRepository
               name: flux-system
               namespace: flux-system
-            targetNamespace: ${TARGET_NS}
+            targetNamespace: ${TARGET_NS} # ← this does namespace injection
             wait: true
             timeout: 2m
           EOF
