@@ -1,4 +1,4 @@
-name: Promote build manifests to environment
+name: Promote release manifests to environment
 
 on:
   # This workflow is reusable from app repositories.
@@ -7,17 +7,16 @@ on:
     inputs:
       app_name:
         description: "Application name (defaults to repo name)"
-        required: false
-        default: ${{ github.event.repository.name }}
-        type: string
-
-      build_run_id:
-        description: "Build run ID to promote (must be provided by the deploy workflow)"
         required: true
         type: string
 
       target_env:
         description: "Target logical environment (e.g., dev, prod)"
+        required: true
+        type: string
+
+      release_tag:
+        description: "Release tag to promote"
         required: true
         type: string
 
@@ -27,65 +26,62 @@ on:
         required: true
 
 permissions:
-  contents: none
+  contents: read
 
 jobs:
-  promote_manifests:
+  promote:
     runs-on: ubuntu-latest
 
     steps:
       # ------------------------------------------------------------
-      # 0. Configure SSH using the deploy key
-      #    This ensures repo-scoped, machine-only write access
-      #    to the Flux GitOps repository.
+      # 0. Configure SSH using the deploy key.
+      #
+      # This ensures repo-scoped, machine-only write access
+      # to the Flux GitOps repository.
       # ------------------------------------------------------------
-      - name: Configure SSH for Flux deploy key
-        shell: bash
+      - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.OCI_K3S_FLUX_REPO_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-
-          # Preload GitHub host key to avoid interactive trust prompt
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       # ------------------------------------------------------------
-      # 1. Download the build-output artifact produced by the build pipeline
-      #    The deploy workflow ALWAYS provides build_run_id.
+      # 1. Download release assets.
+      #
+      # This replaces the old artifact-based model. Releases
+      # provide immutable, versioned, long-lived artifacts.
       # ------------------------------------------------------------
-      - name: Download build-output artifact
-        uses: actions/download-artifact@v4
+      - name: Download release assets
+        uses: robinraju/release-downloader@v1
         with:
-          name: build-output
-          run-id: ${{ inputs.build_run_id }}
-          # This tells the action to use the run's built-in auth to
-          # download artifacts from a given workflow/run than the current.
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: build-output
+          tag: ${{ inputs.release_tag }}
+          fileName: "*"
+          out-file-path: release-assets
 
       # ------------------------------------------------------------
-      # 1b. Validate artifact structure before promotion
-      #     This prevents silent bad promotions due to missing files.
+      # 1b. Validate release structure before promotion.
+      #
+      # This prevents silent bad promotions due to missing files.
       # ------------------------------------------------------------
-      - name: Validate build-output structure
-        shell: bash
+      - name: Validate release structure
         run: |
-          if [ ! -d build-output/manifests ]; then
-            echo "ERROR: build-output artifact is missing manifests/ directory."
+          if [ ! -d release-assets/manifests ]; then
+            echo "ERROR: manifests/ missing in release"
             exit 1
           fi
-          if [ ! -f build-output/kustomization.yaml ]; then
-            echo "ERROR: build-output artifact is missing kustomization.yaml."
+          if [ ! -f release-assets/kustomization.yaml ]; then
+            echo "ERROR: kustomization.yaml missing in release"
             exit 1
           fi
-          echo "build-output artifact validated successfully."
 
       # ------------------------------------------------------------
-      # 2. Checkout the Flux GitOps repository using SSH + deploy key
-      #    The repo name is provided via variable OCI_K3S_FLUX_REPO
-      #    to keep platform ownership of the GitOps repo.
+      # 2. Checkout the Flux GitOps repository using SSH + deploy key.
+      #
+      # The repo name is provided via variable OCI_K3S_FLUX_REPO
+      # to keep platform ownership of the GitOps repo.
       # ------------------------------------------------------------
-      - name: Checkout Flux repository
+      - name: Checkout Flux repo
         uses: actions/checkout@v4
         with:
           repository: ${{ vars.OCI_K3S_FLUX_REPO }}
@@ -93,44 +89,31 @@ jobs:
           path: flux-repo
 
       # ------------------------------------------------------------
-      # 3. Copy build artifacts into the target environment folder
-      #    This ensures apps/<env>/<app> contains ONLY the promoted build.
+      # 3. Copy release artifacts into the target environment folder.
+      #
+      # This ensures apps/<env>/<app> contains ONLY the promoted build.
       # ------------------------------------------------------------
-      - name: Promote manifests from build-output to target environment
-        shell: bash
+      - name: Promote manifests
         run: |
-          DEST_PATH="flux-repo/apps/${{ inputs.target_env }}/${{ inputs.app_name }}"
-
-          echo "Promoting build-output → ${DEST_PATH}"
-
-          mkdir -p "${DEST_PATH}"
-          # Remove any previous contents to keep promotions deterministic
-          rm -rf "${DEST_PATH:?}/"*
-
-          # Copy manifests and kustomization.yaml from the build artifact
-          cp -R build-output/manifests "${DEST_PATH}/"
-          cp build-output/kustomization.yaml "${DEST_PATH}/"
-
-          echo "Contents of ${DEST_PATH}:"
-          ls -R "${DEST_PATH}"
+          DEST="flux-repo/apps/${{ inputs.target_env }}/${{ inputs.app_name }}"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          cp -R release-assets/manifests "$DEST/"
+          cp release-assets/kustomization.yaml "$DEST/"
 
       # ------------------------------------------------------------
-      # 4. Generate per-app Flux Kustomization CR
-      #    This CR isolates reconciliation to ONLY this app folder.
-      #    Namespace is derived from the environment: <env>-apps.
+      # 4. Generate per-app Flux Kustomization CR.
+      #
+      # This CR isolates reconciliation to ONLY this app folder.
+      # Namespace is derived from the environment: <env>-apps.
       # ------------------------------------------------------------
-      - name: Generate per-app Flux Kustomization
-        shell: bash
+      - name: Generate Flux Kustomization
         run: |
-          APP_KUSTOMIZATION="flux-repo/clusters/k3s/${{ inputs.target_env }}/apps/${{ inputs.app_name }}.yaml"
-          TARGET_NS="${{ inputs.target_env }}-apps"
+          FILE="flux-repo/clusters/k3s/${{ inputs.target_env }}/apps/${{ inputs.app_name }}.yaml"
+          NS="${{ inputs.target_env }}-apps"
+          mkdir -p "$(dirname "$FILE")"
 
-          echo "Generating Flux Kustomization at: ${APP_KUSTOMIZATION}"
-          echo "Using namespace: ${TARGET_NS}"
-
-          mkdir -p "$(dirname "${APP_KUSTOMIZATION}")"
-
-          cat > "${APP_KUSTOMIZATION}" <<EOF
+          cat > "$FILE" <<EOF
           apiVersion: kustomize.toolkit.fluxcd.io/v1
           kind: Kustomization
           metadata:
@@ -144,31 +127,22 @@ jobs:
               kind: GitRepository
               name: flux-system
               namespace: flux-system
-            targetNamespace: ${TARGET_NS} # ← this does namespace injection
+            targetNamespace: ${NS}
             wait: true
             timeout: 2m
           EOF
 
-          echo "Generated Flux Kustomization:"
-          cat "${APP_KUSTOMIZATION}"
-
       # ------------------------------------------------------------
-      # 5. Commit and push changes to Flux repo using deploy key
-      #    This ensures machine-identity commits and prevents
-      #    human PAT drift or privilege leakage.
+      # 5. Commit and push changes to Flux repo using deploy key.
+      #
+      # This ensures machine-identity commits and prevents
+      # human PAT drift or privilege leakage.
       # ------------------------------------------------------------
-      - name: Commit and push promotion to Flux repo
-        shell: bash
+      - name: Commit & push
         run: |
           cd flux-repo
           git config user.name "${{ github.repository_owner }}-github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-
           git add .
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-
-          git commit -m "Promote ${{ inputs.app_name }} to ${{ inputs.target_env }} from build ${{ github.sha }}"
+          git commit -m "Promote ${{ inputs.app_name }} to ${{ inputs.target_env }} from release ${{ inputs.release_tag }}" || echo "No changes"
           git push
