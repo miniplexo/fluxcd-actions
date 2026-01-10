@@ -107,7 +107,7 @@ jobs:
       #
       # This is REQUIRED because reusable workflows run in isolated
       # job sandboxes. Uploading here is the only way for the caller
-      # workflow to retrieve the generated files.
+      # workflow (and workflow_run triggers) to retrieve the generated files.
       # ------------------------------------------------------------
       - name: Upload Kubernetes manifests as artifact
         uses: actions/upload-artifact@v4
