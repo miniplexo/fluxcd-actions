@@ -102,15 +102,6 @@ jobs:
           echo "metadata.json created:"
           cat "${{ inputs.output_path }}/metadata.json"
 
-      - name: Upload Kubernetes manifests as artifact
-        # This makes the manifests available to downstream reusable workflows
-        # (e.g., promotion workflows that pull the latest build-output artifact).
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-output
-          path: ${{ inputs.output_path }}
-          if-no-files-found: error
-
       # OPTIONAL: add patches / transforms here if needed
       # - name: Apply patches to manifests
       #   run: |
