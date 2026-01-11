@@ -96,7 +96,7 @@ jobs:
           {
             "app": "${{ inputs.app_name }}",
             "git_sha": "${{ github.sha }}",
-            "build_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            "build_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
             "branch": "${GITHUB_REF_NAME}"
           }
           EOF
