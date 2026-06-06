@@ -86,7 +86,7 @@ jobs:
       # to keep platform ownership of the GitOps repo.
       # ------------------------------------------------------------
       - name: Checkout Flux repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ vars.OCI_K3S_FLUX_REPO }}
           ssh-key: ${{ secrets.OCI_K3S_FLUX_REPO_DEPLOY_KEY }}
